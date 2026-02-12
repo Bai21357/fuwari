@@ -65,3 +65,5 @@ SteamClient64Dll=steamclient64.dll
 ![](../assets/images/hook-steam-drm-5.webp)
 
 随后运行， `steamclient_loader.exe` 即可在不启动Steam的情况下直接拉起游戏
+
+![](../assets/images/VMWSQyHhF5.gif)
