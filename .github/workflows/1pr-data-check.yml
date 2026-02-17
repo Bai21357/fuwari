@@ -3,88 +3,113 @@ name: 1PR Data Path Check
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
-  issue_comment:
-    types: [created]
-  workflow_dispatch:
-
 
 permissions:
   pull-requests: write
   contents: read
+  issues: write
 
 jobs:
-  check-pr:
+  path-check:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Check changed files
+      - name: Check PR file paths
         uses: actions/github-script@v7
         with:
           script: |
-            const isManual = context.eventName === "workflow_dispatch";
 
-            async function checkPR(pr) {
-              const prNumber = pr.number;
-              console.log(`Checking PR #${prNumber}`);
+            console.log("=== PR Data Path Check Started ===");
 
-              const files = await github.paginate(
-                github.rest.pulls.listFiles,
-                {
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: prNumber,
-                }
-              );
+            const allowedPaths = [
+              /^data\/friends\/.+\.json$/,
+              /^data\/sponsors\/.+\.json$/
+            ];
 
-              let hasFriends = false;
-              let hasSponsors = false;
+            const prNumber = context.payload.pull_request.number;
 
-              for (const file of files) {
-                if (file.filename.startsWith("src/data/friends/")) {
-                  hasFriends = true;
-                }
-                if (file.filename.startsWith("src/data/sponsors/")) {
-                  hasSponsors = true;
-                }
+            console.log("Checking PR:", prNumber);
+
+            const files = await github.paginate(
+              github.rest.pulls.listFiles,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
               }
+            );
 
-              const labels = [];
+            if (!files.length) {
+              console.log("No files changed.");
+              return;
+            }
 
-              if (hasFriends) labels.push("友链");
-              if (hasSponsors) labels.push("赞助");
+            let validJsonChanged = false;
+            let invalidPath = false;
 
-              if (labels.length > 0) {
-                await github.rest.issues.addLabels({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: prNumber,
-                  labels: labels,
-                });
+            for (const file of files) {
 
-                console.log(`Added labels ${labels.join(", ")} to PR #${prNumber}`);
-              } else {
-                console.log(`No matching paths in PR #${prNumber}`);
+              console.log("File:", file.filename);
+
+              if (file.status === "removed") continue;
+
+              if (file.filename.endsWith(".json")) {
+
+                const allowed = allowedPaths.some(pattern =>
+                  pattern.test(file.filename)
+                );
+
+                if (!allowed) {
+                  invalidPath = true;
+                  break;
+                }
+
+                validJsonChanged = true;
               }
             }
 
-            if (isManual) {
-              console.log("Manual trigger: checking all open PRs");
+            if (invalidPath) {
 
-              const prs = await github.paginate(
-                github.rest.pulls.list,
-                {
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  state: "open",
-                }
-              );
+              console.log("Invalid file path detected.");
 
-              for (const pr of prs) {
-                await checkPR(pr);
-              }
-            } else {
-              await checkPR(context.payload.pull_request);
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: "❌ JSON 文件路径不合法，仅允许修改 data/friends/ 或 data/sponsors/ 目录。"
+              });
+
+              await github.rest.pulls.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                state: "closed"
+              });
+
+              return;
             }
+
+            if (!validJsonChanged) {
+
+              console.log("No JSON files changed.");
+
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: ["invalid-json"]
+              });
+
+              return;
+            }
+
+            console.log("Path check passed.");
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              labels: ["path-check-passed"]
+            });
+
+            console.log("=== PR Data Path Check Finished ===");
