@@ -496,7 +496,7 @@ jobs:
           const filePath = process.argv[2];
           if (!filePath) { console.error("Usage: node check-pr-content.js <file-path>"); process.exit(1); }
           checkPrFile(filePath).catch(err => { console.error("Unexpected Error:", err); process.exit(1); });
-EOF
+          EOF
 
                  if ! node /tmp/check-pr-content.js "$file"; then
                     # 捕获错误
