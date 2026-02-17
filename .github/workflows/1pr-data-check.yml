@@ -1,0 +1,115 @@
+name: 1PR Data Path Check
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+  contents: read
+  issues: write
+
+jobs:
+  path-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check PR file paths
+        uses: actions/github-script@v7
+        with:
+          script: |
+
+            console.log("=== PR Data Path Check Started ===");
+
+            const allowedPaths = [
+              /^data\/friends\/.+\.json$/,
+              /^data\/sponsors\/.+\.json$/
+            ];
+
+            const prNumber = context.payload.pull_request.number;
+
+            console.log("Checking PR:", prNumber);
+
+            const files = await github.paginate(
+              github.rest.pulls.listFiles,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+              }
+            );
+
+            if (!files.length) {
+              console.log("No files changed.");
+              return;
+            }
+
+            let validJsonChanged = false;
+            let invalidPath = false;
+
+            for (const file of files) {
+
+              console.log("File:", file.filename);
+
+              if (file.status === "removed") continue;
+
+              if (file.filename.endsWith(".json")) {
+
+                const allowed = allowedPaths.some(pattern =>
+                  pattern.test(file.filename)
+                );
+
+                if (!allowed) {
+                  invalidPath = true;
+                  break;
+                }
+
+                validJsonChanged = true;
+              }
+            }
+
+            if (invalidPath) {
+
+              console.log("Invalid file path detected.");
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: "❌ JSON 文件路径不合法，仅允许修改 data/friends/ 或 data/sponsors/ 目录。"
+              });
+
+              await github.rest.pulls.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                state: "closed"
+              });
+
+              return;
+            }
+
+            if (!validJsonChanged) {
+
+              console.log("No JSON files changed.");
+
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: ["invalid-json"]
+              });
+
+              return;
+            }
+
+            console.log("Path check passed.");
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              labels: ["path-check-passed"]
+            });
+
+            console.log("=== PR Data Path Check Finished ===");

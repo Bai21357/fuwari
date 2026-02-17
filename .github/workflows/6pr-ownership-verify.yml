@@ -1,0 +1,170 @@
+name: 6PR Ownership Verification Final
+
+on:
+  pull_request:
+    types: [synchronize, reopened]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+
+permissions:
+  pull-requests: write
+  contents: write
+  issues: write
+
+jobs:
+  ownership-verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Final ownership verification
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runningLabel = "所有权验证进行中";
+
+            console.log("=== Ownership Final Verification Started ===");
+
+            async function verifyPR(prNumber) {
+
+              console.log("Checking PR:", prNumber);
+
+              const pr = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+              });
+
+              const labels = pr.data.labels.map(l => l.name);
+
+              if (!labels.includes(runningLabel)) {
+                console.log("Skip PR (not in verification)");
+                return;
+              }
+
+              // 获取 PR 评论
+              const comments = await github.paginate(
+                github.rest.issues.listComments,
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                }
+              );
+
+              // 找到最近的验证 URL
+              let verifyUrl = null;
+
+              for (const comment of comments.reverse()) {
+                const match = comment.body.match(/https?:\/\/[^\s]+\.txt/);
+                if (match) {
+                  verifyUrl = match[0];
+                  break;
+                }
+              }
+
+              if (!verifyUrl) {
+                console.log("No verification URL found.");
+                return;
+              }
+
+              console.log("Verification URL:", verifyUrl);
+
+              const prHash = pr.data.head.sha;
+
+              try {
+
+                const response = await fetch(verifyUrl, {
+                  redirect: "follow"
+                });
+
+                const text = await response.text();
+
+                if (!response.ok) {
+                  throw new Error("HTTP Status: " + response.status);
+                }
+
+                if (text.trim() !== prHash.trim()) {
+                  throw new Error(
+                    "File content mismatch. Expected: " +
+                    prHash +
+                    " Got: " +
+                    text.trim()
+                  );
+                }
+
+                // ===== SUCCESS =====
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  body: "所有权验证已成功，PR 将自动合并！"
+                });
+
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  name: runningLabel,
+                });
+
+                await github.rest.pulls.merge({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                  merge_method: "squash"
+                });
+
+                console.log("PR merged:", prNumber);
+
+              } catch (error) {
+
+                const log = error.message;
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  body: "所有权验证未成功，详细日志：" + log
+                });
+
+                console.log("Verification failed:", log);
+              }
+            }
+
+            // ===== 触发来源判断 =====
+
+            if (context.eventName === "issue_comment") {
+
+              if (!context.payload.issue.pull_request) {
+                console.log("Not a PR comment.");
+                return;
+              }
+
+              const prNumber = context.payload.issue.number;
+              await verifyPR(prNumber);
+
+            } else if (context.eventName === "pull_request") {
+
+              const prNumber = context.payload.pull_request.number;
+              await verifyPR(prNumber);
+
+            } else {
+
+              // 手动触发：检查所有 PR
+              const prs = await github.paginate(
+                github.rest.pulls.list,
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  state: "open",
+                }
+              );
+
+              for (const pr of prs) {
+                await verifyPR(pr.number);
+              }
+            }
+
+            console.log("=== Ownership Final Verification Finished ===");
