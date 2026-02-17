@@ -217,11 +217,12 @@ jobs:
             
             # 过滤相关文件
             relevant_files=""
-            for f in $files; do
+            # 使用 while read 循环处理包含空格的文件名
+            while IFS= read -r f; do
               if [[ "$f" == src/data/friends/* ]] || [[ "$f" == src/data/sponsors/* ]]; then
-                relevant_files="$relevant_files $f"
+                relevant_files="$relevant_files \"$f\""
               fi
-            done
+            done <<< "$files"
             
             if [ -z "$relevant_files" ]; then
               echo "PR #$pr 中没有相关文件"
@@ -236,7 +237,9 @@ jobs:
             # 清理 OUTPUT 文件
             echo "" > "$GITHUB_OUTPUT"
             
-            for file in $relevant_files; do
+            # 使用 eval 来正确处理带引号的文件名列表
+            eval "set -- $relevant_files"
+            for file in "$@"; do
               if [ -f "$file" ]; then
                  if ! node scripts/check-pr-content.js "$file"; then
                     # 捕获错误
