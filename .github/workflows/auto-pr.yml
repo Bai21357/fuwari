@@ -263,11 +263,6 @@ jobs:
               title: `${primary.kind === 'friend' ? '友链' : '赞助'}：${primary.data.name}`,
             })
 
-            if (primary.data.vip === true) {
-              core.info('vip=true, skip URL reachability checks.')
-              return
-            }
-
             const avatarUrl = normalizeUrl(primary.data.avatar)
             const siteUrl = normalizeUrl(primary.data.url)
 
@@ -501,94 +496,89 @@ jobs:
               pull_number,
               title: `${primary.kind === 'friend' ? '友链' : '赞助'}：${primary.data.name}`,
             })
+            const siteBase = await getSiteBase(pr.data.base.repo.default_branch)
+            const avatarUrl = normalizeUrl(primary.data.avatar, siteBase)
+            const siteUrl = normalizeUrl(primary.data.url, siteBase)
 
-            if (primary.data.vip === true) {
-              core.info('vip=true, skip URL reachability checks.')
-            } else {
-              const siteBase = await getSiteBase(pr.data.base.repo.default_branch)
-              const avatarUrl = normalizeUrl(primary.data.avatar, siteBase)
-              const siteUrl = normalizeUrl(primary.data.url, siteBase)
+            const avatarCheck = avatarUrl ? await checkUrl(avatarUrl, { timeoutMs: 10000 }) : { ok: false, error: 'Invalid avatar URL' }
+            const siteCheck =
+              primary.kind === 'friend'
+                ? siteUrl
+                  ? await checkUrl(siteUrl, { timeoutMs: 10000 })
+                  : { ok: false, error: 'Invalid site URL' }
+                : siteUrl
+                  ? await checkUrl(siteUrl, { timeoutMs: 10000 })
+                  : null
 
-              const avatarCheck = avatarUrl ? await checkUrl(avatarUrl, { timeoutMs: 10000 }) : { ok: false, error: 'Invalid avatar URL' }
-              const siteCheck =
-                primary.kind === 'friend'
-                  ? siteUrl
-                    ? await checkUrl(siteUrl, { timeoutMs: 10000 })
-                    : { ok: false, error: 'Invalid site URL' }
-                  : siteUrl
-                    ? await checkUrl(siteUrl, { timeoutMs: 10000 })
-                    : null
+            const addReach = []
+            const removeReach = [LABEL_AVATAR_OK, LABEL_AVATAR_BAD, LABEL_SITE_OK, LABEL_SITE_BAD, LABEL_ALL_OK]
 
-              const addReach = []
-              const removeReach = [LABEL_AVATAR_OK, LABEL_AVATAR_BAD, LABEL_SITE_OK, LABEL_SITE_BAD, LABEL_ALL_OK]
+            addReach.push(avatarCheck.ok ? LABEL_AVATAR_OK : LABEL_AVATAR_BAD)
+            if (siteCheck) addReach.push(siteCheck.ok ? LABEL_SITE_OK : LABEL_SITE_BAD)
 
-              addReach.push(avatarCheck.ok ? LABEL_AVATAR_OK : LABEL_AVATAR_BAD)
-              if (siteCheck) addReach.push(siteCheck.ok ? LABEL_SITE_OK : LABEL_SITE_BAD)
+            const allOk = avatarCheck.ok && (!siteCheck || siteCheck.ok)
+            if (allOk && siteCheck) addReach.push(LABEL_ALL_OK)
 
-              const allOk = avatarCheck.ok && (!siteCheck || siteCheck.ok)
-              if (allOk && siteCheck) addReach.push(LABEL_ALL_OK)
+            await setLabels({ addLabels: addReach, removeLabels: removeReach })
 
-              await setLabels({ addLabels: addReach, removeLabels: removeReach })
+            if (!avatarCheck.ok || (siteCheck && !siteCheck.ok)) {
+              await createComment('检测到链接不可达，请修复后再次回复“准备完毕”。')
+              return
+            }
 
-              if (!avatarCheck.ok || (siteCheck && !siteCheck.ok)) {
-                await createComment('检测到链接不可达，请修复后再次回复“准备完毕”。')
+            if (primary.kind === 'friend') {
+              const token = `fuwari-verify:${pull_number}:${pr.data.user.login}`
+              const verifyUrl = siteUrl ? new URL('/.well-known/fuwari-verify.txt', siteUrl).toString() : null
+              if (!verifyUrl) {
+                await createComment('所有权验证失败：友链 JSON 中 url 无效。')
+                return
+              }
+              const verifyRes = await checkUrl(verifyUrl, { timeoutMs: 10000 })
+              if (!verifyRes.ok) {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [LABEL_VERIFYING] })
+                await createComment(
+                  [
+                    '所有权验证未通过：验证文件不可访问。',
+                    '',
+                    `请放置：${verifyUrl}`,
+                    `内容包含：${token}`,
+                    '完成后再次回复：准备完毕',
+                  ].join('\n')
+                )
+                return
+              }
+              const txt = await (async () => {
+                const controller = new AbortController()
+                const timer = setTimeout(() => controller.abort(), 10000)
+                try {
+                  const res = await fetch(verifyUrl, {
+                    method: 'GET',
+                    redirect: 'follow',
+                    headers: { 'user-agent': 'fuwari-auto-pr/1.0 (+github actions)', accept: 'text/plain,*/*;q=0.8' },
+                    signal: controller.signal,
+                  })
+                  return await res.text()
+                } finally {
+                  clearTimeout(timer)
+                }
+              })()
+              if (!txt.includes(token)) {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [LABEL_VERIFYING] })
+                await createComment(
+                  [
+                    '所有权验证未通过：验证文件内容不匹配。',
+                    '',
+                    `请确认 ${verifyUrl} 的文本内容包含：${token}`,
+                    '完成后再次回复：准备完毕',
+                  ].join('\n')
+                )
                 return
               }
 
-              if (primary.kind === 'friend') {
-                const token = `fuwari-verify:${pull_number}:${pr.data.user.login}`
-                const verifyUrl = siteUrl ? new URL('/.well-known/fuwari-verify.txt', siteUrl).toString() : null
-                if (!verifyUrl) {
-                  await createComment('所有权验证失败：友链 JSON 中 url 无效。')
-                  return
-                }
-                const verifyRes = await checkUrl(verifyUrl, { timeoutMs: 10000 })
-                if (!verifyRes.ok) {
-                  await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [LABEL_VERIFYING] })
-                  await createComment(
-                    [
-                      '所有权验证未通过：验证文件不可访问。',
-                      '',
-                      `请放置：${verifyUrl}`,
-                      `内容包含：${token}`,
-                      '完成后再次回复：准备完毕',
-                    ].join('\n')
-                  )
-                  return
-                }
-                const txt = await (async () => {
-                  const controller = new AbortController()
-                  const timer = setTimeout(() => controller.abort(), 10000)
-                  try {
-                    const res = await fetch(verifyUrl, {
-                      method: 'GET',
-                      redirect: 'follow',
-                      headers: { 'user-agent': 'fuwari-auto-pr/1.0 (+github actions)', accept: 'text/plain,*/*;q=0.8' },
-                      signal: controller.signal,
-                    })
-                    return await res.text()
-                  } finally {
-                    clearTimeout(timer)
-                  }
-                })()
-                if (!txt.includes(token)) {
-                  await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [LABEL_VERIFYING] })
-                  await createComment(
-                    [
-                      '所有权验证未通过：验证文件内容不匹配。',
-                      '',
-                      `请确认 ${verifyUrl} 的文本内容包含：${token}`,
-                      '完成后再次回复：准备完毕',
-                    ].join('\n')
-                  )
-                  return
-                }
-
-                try {
-                  await github.rest.issues.removeLabel({ owner, repo, issue_number: pull_number, name: LABEL_VERIFYING })
-                } catch (e) {
-                  if (e.status !== 404) throw e
-                }
+              try {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number: pull_number, name: LABEL_VERIFYING })
+              } catch (e) {
+                if (e.status !== 404) throw e
               }
             }
 
