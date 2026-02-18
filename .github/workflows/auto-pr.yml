@@ -324,9 +324,7 @@ jobs:
                 const backlink = primary.data.backlink
 
                 if (!isNonEmptyString(backlink)) {
-                  if (!existingLabelNames.has(LABEL_BIDIR) && !existingLabelNames.has(LABEL_BIDIR_OK)) {
-                    await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [LABEL_BIDIR] })
-                  }
+                  await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
                   await createComment(
                     [
                       '基础校验已通过，需要进行双向链接验证：',
@@ -353,17 +351,36 @@ jobs:
                 try {
                   backlinkUrl = new URL(backlink).toString()
                 } catch {
-                  if (!existingLabelNames.has(LABEL_BIDIR) && !existingLabelNames.has(LABEL_BIDIR_OK)) {
-                    await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [LABEL_BIDIR] })
-                  }
+                  await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
                   await createComment(`双向链接验证失败：backlink 不是合法的 URL（${backlink}）`)
                   return
                 }
                 if (!backlinkUrl.startsWith('http://') && !backlinkUrl.startsWith('https://')) {
-                  if (!existingLabelNames.has(LABEL_BIDIR) && !existingLabelNames.has(LABEL_BIDIR_OK)) {
-                    await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [LABEL_BIDIR] })
-                  }
+                  await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
                   await createComment(`双向链接验证失败：backlink 必须以 http/https 开头（${backlink}）`)
+                  return
+                }
+
+                let siteUrlObj
+                try {
+                  siteUrlObj = new URL(siteUrl)
+                } catch {
+                  await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
+                  await createComment('双向链接验证失败：友链 JSON 中 url 无效，无法比较主域名。')
+                  return
+                }
+                const backlinkHost = new URL(backlinkUrl).host.toLowerCase()
+                const siteHost = siteUrlObj.host.toLowerCase()
+                if (backlinkHost !== siteHost) {
+                  await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
+                  await createComment(
+                    [
+                      '双向链接验证失败：backlink 的主域名必须与 url 的主域名一致。',
+                      '',
+                      `url：${siteUrlObj.toString()}`,
+                      `backlink：${backlinkUrl}`,
+                    ].join('\n')
+                  )
                   return
                 }
 
@@ -378,11 +395,13 @@ jobs:
                       signal: controller.signal,
                     })
                     if (!res.ok) {
+                      await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
                       await createComment(`双向链接验证失败：无法访问 backlink （${res.status}）：${backlinkUrl}`)
                       return null
                     }
                     return await res.text()
                   } catch (e) {
+                    await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
                     await createComment(`双向链接验证失败：访问 backlink 出错：${backlinkUrl} （${e?.message || e}）`)
                     return null
                   } finally {
@@ -405,9 +424,7 @@ jobs:
                 }
 
                 if (!found) {
-                  if (!existingLabelNames.has(LABEL_BIDIR)) {
-                    await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [LABEL_BIDIR] })
-                  }
+                  await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
                   await createComment(
                     [
                       '双向链接验证未通过：在 backlink 页面未检测到本站友链。',
