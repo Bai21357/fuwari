@@ -110,7 +110,18 @@ jobs:
             }
 
             async function createComment(body) {
-              await github.rest.issues.createComment({ owner, repo, issue_number: pull_number, body })
+              core.info(`createComment len=${String(body || '').length}`)
+              try {
+                await github.rest.issues.createComment({ owner, repo, issue_number: pull_number, body })
+                core.info('createComment ok')
+              } catch (e) {
+                core.error(`createComment failed: status=${e?.status || ''}`)
+                core.error(`createComment failed: message=${e?.message || e}`)
+                try {
+                  core.error(`createComment failed: response=${JSON.stringify(e?.response?.data || null)}`)
+                } catch {}
+                throw e
+              }
             }
 
             function isNonEmptyString(v) {
@@ -309,21 +320,30 @@ jobs:
             await setLabels({ addLabels: addReach, removeLabels: removeReach })
 
             const existingLabelNames = new Set((context.payload.pull_request.labels || []).map((l) => l.name))
+            core.info(`bidir: event.action=${context.payload.action || ''}`)
+            core.info(`bidir: siteBase=${siteBase || ''}`)
+            core.info(`bidir: existingLabels=${Array.from(existingLabelNames).join(',')}`)
             if (primary.kind === 'friend') {
               const isBidirFlow = existingLabelNames.has(LABEL_BIDIR) || existingLabelNames.has(LABEL_BIDIR_OK) || context.payload.action === 'opened'
+              core.info(`bidir: primary.kind=friend isBidirFlow=${isBidirFlow}`)
               if (isBidirFlow) {
                 if (!siteBase) {
+                  core.info('bidir: missing siteBase -> comment and return')
                   await createComment('无法读取本站 site 配置，无法进行双向链接验证。')
                   return
                 }
                 if (!existingLabelNames.has(LABEL_BIDIR) && !existingLabelNames.has(LABEL_BIDIR_OK)) {
+                  core.info('bidir: add LABEL_BIDIR')
                   await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [LABEL_BIDIR] })
                 }
 
                 const expected = siteBase.replace(/\/$/, '')
                 const backlink = primary.data.backlink
+                core.info(`bidir: url=${String(siteUrl || '')}`)
+                core.info(`bidir: backlink=${String(backlink || '')}`)
 
                 if (!isNonEmptyString(backlink)) {
+                  core.info('bidir: missing backlink -> setLabels + comment')
                   await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
                   await createComment(
                     [
@@ -351,11 +371,13 @@ jobs:
                 try {
                   backlinkUrl = new URL(backlink).toString()
                 } catch {
+                  core.info('bidir: backlink invalid url -> setLabels + comment')
                   await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
                   await createComment(`双向链接验证失败：backlink 不是合法的 URL（${backlink}）`)
                   return
                 }
                 if (!backlinkUrl.startsWith('http://') && !backlinkUrl.startsWith('https://')) {
+                  core.info('bidir: backlink not http(s) -> setLabels + comment')
                   await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
                   await createComment(`双向链接验证失败：backlink 必须以 http/https 开头（${backlink}）`)
                   return
@@ -365,13 +387,16 @@ jobs:
                 try {
                   siteUrlObj = new URL(siteUrl)
                 } catch {
+                  core.info('bidir: siteUrl invalid -> setLabels + comment')
                   await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
                   await createComment('双向链接验证失败：友链 JSON 中 url 无效，无法比较主域名。')
                   return
                 }
                 const backlinkHost = new URL(backlinkUrl).host.toLowerCase()
                 const siteHost = siteUrlObj.host.toLowerCase()
+                core.info(`bidir: host url=${siteHost} backlink=${backlinkHost}`)
                 if (backlinkHost !== siteHost) {
+                  core.info('bidir: host mismatch -> setLabels + comment')
                   await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
                   await createComment(
                     [
@@ -395,12 +420,15 @@ jobs:
                       signal: controller.signal,
                     })
                     if (!res.ok) {
+                      core.info(`bidir: fetch backlink not ok status=${res.status}`)
                       await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
                       await createComment(`双向链接验证失败：无法访问 backlink （${res.status}）：${backlinkUrl}`)
                       return null
                     }
+                    core.info('bidir: fetch backlink ok, read text')
                     return await res.text()
                   } catch (e) {
+                    core.info(`bidir: fetch backlink threw: ${e?.message || e}`)
                     await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
                     await createComment(`双向链接验证失败：访问 backlink 出错：${backlinkUrl} （${e?.message || e}）`)
                     return null
@@ -409,6 +437,7 @@ jobs:
                   }
                 })()
                 if (!html) return
+                core.info(`bidir: html length=${html.length}`)
 
                 let found = false
                 const re = /href\s*=\s*["']([^"']+)["']/gi
@@ -422,8 +451,10 @@ jobs:
                     break
                   }
                 }
+                core.info(`bidir: expected=${expected} found=${found}`)
 
                 if (!found) {
+                  core.info('bidir: not found -> setLabels + comment')
                   await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
                   await createComment(
                     [
@@ -439,6 +470,7 @@ jobs:
                 }
 
                 await setLabels({ addLabels: [LABEL_BIDIR_OK], removeLabels: [LABEL_BIDIR] })
+                core.info('bidir: verified ok -> merge')
 
                 try {
                   await github.rest.pulls.merge({ owner, repo, pull_number, merge_method: 'squash' })
