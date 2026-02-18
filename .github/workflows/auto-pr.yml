@@ -316,6 +316,9 @@ jobs:
                   await createComment('无法读取本站 site 配置，无法进行双向链接验证。')
                   return
                 }
+                if (context.payload.action === 'opened' && !existingLabelNames.has(LABEL_BIDIR) && !existingLabelNames.has(LABEL_BIDIR_OK)) {
+                  await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [LABEL_BIDIR] })
+                }
 
                 const expected = siteBase.replace(/\/$/, '')
                 const backlink = primary.data.backlink
@@ -350,10 +353,16 @@ jobs:
                 try {
                   backlinkUrl = new URL(backlink).toString()
                 } catch {
+                  if (!existingLabelNames.has(LABEL_BIDIR) && !existingLabelNames.has(LABEL_BIDIR_OK)) {
+                    await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [LABEL_BIDIR] })
+                  }
                   await createComment(`双向链接验证失败：backlink 不是合法的 URL（${backlink}）`)
                   return
                 }
                 if (!backlinkUrl.startsWith('http://') && !backlinkUrl.startsWith('https://')) {
+                  if (!existingLabelNames.has(LABEL_BIDIR) && !existingLabelNames.has(LABEL_BIDIR_OK)) {
+                    await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [LABEL_BIDIR] })
+                  }
                   await createComment(`双向链接验证失败：backlink 必须以 http/https 开头（${backlink}）`)
                   return
                 }
