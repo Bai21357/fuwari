@@ -359,12 +359,12 @@ jobs:
                       signal: controller.signal,
                     })
                     if (!res.ok) {
-                      await createComment(`双向链接验证失败：无法访问 backlink（${res.status}）：${backlinkUrl}`)
+                      await createComment(`双向链接验证失败：无法访问 backlink （${res.status}）：${backlinkUrl}`)
                       return null
                     }
                     return await res.text()
                   } catch (e) {
-                    await createComment(`双向链接验证失败：访问 backlink 出错：${backlinkUrl}（${e?.message || e}）`)
+                    await createComment(`双向链接验证失败：访问 backlink 出错：${backlinkUrl} （${e?.message || e}）`)
                     return null
                   } finally {
                     clearTimeout(timer)
