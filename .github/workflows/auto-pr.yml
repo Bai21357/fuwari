@@ -36,7 +36,6 @@ jobs:
             const LABEL_SITE_OK = '网站可达'
             const LABEL_SITE_BAD = '网站不可达'
             const LABEL_ALL_OK = 'URL全部可达'
-            const LABEL_VERIFYING = '所有权验证进行中'
             const LABEL_BIDIR = '双向链接验证'
             const LABEL_BIDIR_OK = '双向链接验证通过'
 
@@ -84,7 +83,6 @@ jobs:
               LABEL_SITE_OK,
               LABEL_SITE_BAD,
               LABEL_ALL_OK,
-              LABEL_VERIFYING,
               LABEL_BIDIR,
               LABEL_BIDIR_OK,
             ]) {
@@ -193,15 +191,27 @@ jobs:
             }
 
             async function setLabels({ addLabels, removeLabels }) {
-              for (const name of removeLabels) {
-                try {
-                  await github.rest.issues.removeLabel({ owner, repo, issue_number: pull_number, name })
-                } catch (e) {
-                  if (e.status !== 404) throw e
+              const addSet = new Set(addLabels || [])
+              const removeSet = new Set(removeLabels || [])
+              for (const x of addSet) removeSet.delete(x)
+
+              const current = await github.rest.issues.get({ owner, repo, issue_number: pull_number })
+              const currentLabels = new Set((current.data.labels || []).map((l) => l.name))
+
+              const finalRemove = Array.from(removeSet).filter((name) => currentLabels.has(name))
+              if (finalRemove.length) {
+                for (const name of finalRemove) {
+                  try {
+                    await github.rest.issues.removeLabel({ owner, repo, issue_number: pull_number, name })
+                  } catch (e) {
+                    if (e.status !== 404) throw e
+                  }
                 }
               }
-              if (addLabels.length) {
-                await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: addLabels })
+
+              const finalAdd = Array.from(addSet).filter((name) => !currentLabels.has(name))
+              if (finalAdd.length) {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: finalAdd })
               }
             }
 
@@ -346,96 +356,109 @@ jobs:
             core.info(`bidir: siteBase=${siteBase || ''}`)
             core.info(`bidir: existingLabels=${Array.from(existingLabelNames).join(',')}`)
             if (primary.kind === 'friend') {
-              const isLegacyFlow = existingLabelNames.has(LABEL_VERIFYING)
-              const isBidirFlow = !isLegacyFlow
-              core.info(`bidir: primary.kind=friend isLegacyFlow=${isLegacyFlow} isBidirFlow=${isBidirFlow}`)
-              if (isBidirFlow) {
-                if (!siteBase) {
-                  core.info('bidir: missing siteBase -> comment and return')
-                  await createComment('无法读取本站 site 配置，无法进行双向链接验证。')
-                  return
-                }
-                if (!existingLabelNames.has(LABEL_BIDIR) && !existingLabelNames.has(LABEL_BIDIR_OK)) {
-                  core.info('bidir: add LABEL_BIDIR')
-                  await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [LABEL_BIDIR] })
+              if (!siteBase) {
+                core.info('bidir: missing siteBase -> comment and return')
+                await createComment('无法读取本站 site 配置，无法进行双向链接验证。')
+                return
+              }
+              if (!existingLabelNames.has(LABEL_BIDIR) && !existingLabelNames.has(LABEL_BIDIR_OK)) {
+                core.info('bidir: add LABEL_BIDIR')
+                await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [LABEL_BIDIR] })
+              }
+
+              const expected = siteBase.replace(/\/$/, '')
+              const backlink = primary.data.backlink
+              core.info(`bidir: url=${String(siteUrl || '')}`)
+              core.info(`bidir: backlink=${String(backlink || '')}`)
+
+              if (!isNonEmptyString(backlink)) {
+                core.info('bidir: missing backlink -> setLabels + comment')
+                await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
+                await createComment(
+                  [
+                    '基础校验已通过，需要进行双向链接验证：',
+                    '',
+                    `1) 请在你的友链页面添加本站友链（必须为绝对链接）：${siteBase}`,
+                    '2) 然后更新本 PR 的友链 JSON，增加字段 backlink（填写你的友链页面 URL，必须是 http/https 绝对链接）',
+                    '',
+                    '示例：',
+                    '',
+                    '```json',
+                    '{',
+                    '  "name": "...",',
+                    '  "avatar": "...",',
+                    '  "url": "...",',
+                    '  "backlink": "https://example.com/friends/"',
+                    '}',
+                    '```',
+                    '',
+                    `3) 请确保你的 backlink 页面中包含指向本站的链接 href=${siteBase} （必须完全一致的绝对链接）`,
+                    '4) push 更新后 Action 会自动重新校验并在通过后自动合并，无需额外评论',
+                  ].join('\n')
+                )
+                return
+              }
+
+              let backlinkUrl
+              try {
+                backlinkUrl = new URL(backlink).toString()
+              } catch {
+                core.info('bidir: backlink invalid url -> setLabels + comment')
+                await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
+                await createComment(`双向链接验证失败：backlink 不是合法的 URL（${backlink}）`)
+                return
+              }
+              if (!backlinkUrl.startsWith('http://') && !backlinkUrl.startsWith('https://')) {
+                core.info('bidir: backlink not http(s) -> setLabels + comment')
+                await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
+                await createComment(`双向链接验证失败：backlink 必须以 http/https 开头（${backlink}）`)
+                return
+              }
+
+              let siteUrlObj
+              try {
+                siteUrlObj = new URL(siteUrl)
+              } catch {
+                core.info('bidir: siteUrl invalid -> setLabels + comment')
+                await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
+                await createComment('双向链接验证失败：友链 JSON 中 url 无效，无法比较主域名。')
+                return
+              }
+              const backlinkHost = new URL(backlinkUrl).host.toLowerCase()
+              const siteHost = siteUrlObj.host.toLowerCase()
+              core.info(`bidir: host url=${siteHost} backlink=${backlinkHost}`)
+              if (backlinkHost !== siteHost) {
+                core.info('bidir: host mismatch -> setLabels + comment')
+                await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
+                await createComment(
+                  [
+                    '双向链接验证失败：backlink 的主域名必须与 url 的主域名一致。',
+                    '',
+                    `url：${siteUrlObj.toString()}`,
+                    `backlink：${backlinkUrl}`,
+                  ].join('\n')
+                )
+                return
+              }
+
+                function extractTitle(html) {
+                  if (!isNonEmptyString(html)) return null
+                  const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)
+                  if (!m) return null
+                  const t = String(m[1] || '').replace(/\s+/g, ' ').trim()
+                  return t.slice(0, 200)
                 }
 
-                const expected = siteBase.replace(/\/$/, '')
-                const backlink = primary.data.backlink
-                core.info(`bidir: url=${String(siteUrl || '')}`)
-                core.info(`bidir: backlink=${String(backlink || '')}`)
-
-                if (!isNonEmptyString(backlink)) {
-                  core.info('bidir: missing backlink -> setLabels + comment')
-                  await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
-                  await createComment(
-                    [
-                      '基础校验已通过，需要进行双向链接验证：',
-                      '',
-                      `1) 请在你的友链页面添加本站友链（必须为绝对链接）：${siteBase}`,
-                      '2) 然后更新本 PR 的友链 JSON，增加字段 backlink（填写你的友链页面 URL，必须是 http/https 绝对链接）',
-                      '',
-                      '示例：',
-                      '',
-                      '```json',
-                      '{',
-                      '  "name": "...",',
-                      '  "avatar": "...",',
-                      '  "url": "...",',
-                      '  "backlink": "https://example.com/friends/"',
-                      '}',
-                      '```',
-                      '',
-                      `3) 请确保你的 backlink 页面中包含指向本站的链接 href=${siteBase} （必须完全一致的绝对链接）`,
-                      '4) push 更新后 Action 会自动重新校验并在通过后自动合并，无需额外评论',
-                    ].join('\n')
-                  )
-                  return
+                function formatBacklinkDebug(d) {
+                  const lines = ['调试信息：']
+                  if (isNonEmptyString(d?.finalUrl)) lines.push(`- 最终 URL：${d.finalUrl}`)
+                  if (typeof d?.status === 'number') lines.push(`- 状态码：${d.status}`)
+                  if (isNonEmptyString(d?.contentType)) lines.push(`- Content-Type：${d.contentType}`)
+                  if (isNonEmptyString(d?.title)) lines.push(`- 标题：${d.title}`)
+                  return lines.join('\n')
                 }
 
-                let backlinkUrl
-                try {
-                  backlinkUrl = new URL(backlink).toString()
-                } catch {
-                  core.info('bidir: backlink invalid url -> setLabels + comment')
-                  await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
-                  await createComment(`双向链接验证失败：backlink 不是合法的 URL（${backlink}）`)
-                  return
-                }
-                if (!backlinkUrl.startsWith('http://') && !backlinkUrl.startsWith('https://')) {
-                  core.info('bidir: backlink not http(s) -> setLabels + comment')
-                  await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
-                  await createComment(`双向链接验证失败：backlink 必须以 http/https 开头（${backlink}）`)
-                  return
-                }
-
-                let siteUrlObj
-                try {
-                  siteUrlObj = new URL(siteUrl)
-                } catch {
-                  core.info('bidir: siteUrl invalid -> setLabels + comment')
-                  await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
-                  await createComment('双向链接验证失败：友链 JSON 中 url 无效，无法比较主域名。')
-                  return
-                }
-                const backlinkHost = new URL(backlinkUrl).host.toLowerCase()
-                const siteHost = siteUrlObj.host.toLowerCase()
-                core.info(`bidir: host url=${siteHost} backlink=${backlinkHost}`)
-                if (backlinkHost !== siteHost) {
-                  core.info('bidir: host mismatch -> setLabels + comment')
-                  await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
-                  await createComment(
-                    [
-                      '双向链接验证失败：backlink 的主域名必须与 url 的主域名一致。',
-                      '',
-                      `url：${siteUrlObj.toString()}`,
-                      `backlink：${backlinkUrl}`,
-                    ].join('\n')
-                  )
-                  return
-                }
-
-                const html = await (async () => {
+                const fetched = await (async () => {
                   const controller = new AbortController()
                   const timer = setTimeout(() => controller.abort(), 10000)
                   try {
@@ -448,21 +471,48 @@ jobs:
                     if (!res.ok) {
                       core.info(`bidir: fetch backlink not ok status=${res.status}`)
                       await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
-                      await createComment(`双向链接验证失败：无法访问 backlink （${res.status}）：${backlinkUrl}`)
-                      return null
+                      await createComment(
+                        [
+                          `双向链接验证失败：无法访问 backlink（${res.status}）。`,
+                          '',
+                          `backlink：${backlinkUrl}`,
+                          formatBacklinkDebug({
+                            finalUrl: res.url,
+                            status: res.status,
+                            contentType: res.headers.get('content-type') || '',
+                          }),
+                        ].join('\n')
+                      )
+                      return { ok: false }
                     }
                     core.info('bidir: fetch backlink ok, read text')
-                    return await res.text()
+                    const html = await res.text()
+                    return {
+                      ok: true,
+                      html,
+                      finalUrl: res.url,
+                      status: res.status,
+                      contentType: res.headers.get('content-type') || '',
+                      title: extractTitle(html),
+                    }
                   } catch (e) {
                     core.info(`bidir: fetch backlink threw: ${e?.message || e}`)
                     await setLabels({ addLabels: [LABEL_BIDIR], removeLabels: [LABEL_BIDIR_OK] })
-                    await createComment(`双向链接验证失败：访问 backlink 出错：${backlinkUrl} （${e?.message || e}）`)
-                    return null
+                    await createComment(
+                      [
+                        '双向链接验证失败：访问 backlink 出错。',
+                        '',
+                        `backlink：${backlinkUrl}`,
+                        `错误：${e?.message || e}`,
+                      ].join('\n')
+                    )
+                    return { ok: false }
                   } finally {
                     clearTimeout(timer)
                   }
                 })()
-                if (!html) return
+                if (!fetched.ok) return
+                const html = fetched.html || ''
                 core.info(`bidir: html length=${html.length}`)
 
                 let found = false
@@ -489,6 +539,8 @@ jobs:
                       `需要添加的绝对链接：${siteBase}`,
                       `backlink 页面：${backlinkUrl}`,
                       '',
+                      formatBacklinkDebug(fetched),
+                      '',
                       '请添加后 push 更新（无需评论）。',
                     ].join('\n')
                   )
@@ -511,7 +563,7 @@ jobs:
     if: ${{ github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.body == '准备完毕' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Verify ownership and auto-merge
+      - name: Auto-merge
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.PAT }}
@@ -527,7 +579,6 @@ jobs:
             const LABEL_SITE_OK = '网站可达'
             const LABEL_SITE_BAD = '网站不可达'
             const LABEL_ALL_OK = 'URL全部可达'
-            const LABEL_VERIFYING = '所有权验证进行中'
             const LABEL_BIDIR = '双向链接验证'
             const LABEL_BIDIR_OK = '双向链接验证通过'
 
@@ -601,15 +652,27 @@ jobs:
             }
 
             async function setLabels({ addLabels, removeLabels }) {
-              for (const name of removeLabels) {
-                try {
-                  await github.rest.issues.removeLabel({ owner, repo, issue_number: pull_number, name })
-                } catch (e) {
-                  if (e.status !== 404) throw e
+              const addSet = new Set(addLabels || [])
+              const removeSet = new Set(removeLabels || [])
+              for (const x of addSet) removeSet.delete(x)
+
+              const current = await github.rest.issues.get({ owner, repo, issue_number: pull_number })
+              const currentLabels = new Set((current.data.labels || []).map((l) => l.name))
+
+              const finalRemove = Array.from(removeSet).filter((name) => currentLabels.has(name))
+              if (finalRemove.length) {
+                for (const name of finalRemove) {
+                  try {
+                    await github.rest.issues.removeLabel({ owner, repo, issue_number: pull_number, name })
+                  } catch (e) {
+                    if (e.status !== 404) throw e
+                  }
                 }
               }
-              if (addLabels.length) {
-                await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: addLabels })
+
+              const finalAdd = Array.from(addSet).filter((name) => !currentLabels.has(name))
+              if (finalAdd.length) {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: finalAdd })
               }
             }
 
@@ -774,38 +837,6 @@ jobs:
             if (!avatarCheck.ok || (siteCheck && !siteCheck.ok)) {
               await createComment('检测到链接不可达，请修复后再次回复“准备完毕”。')
               return
-            }
-
-            if (primary.kind === 'friend' && prLabels.has(LABEL_VERIFYING)) {
-              const token = `fuwari-verify:${pull_number}:${pr.data.user.login}`
-              const verifyUrl = siteUrl ? new URL('/.well-known/fuwari-verify.txt', siteUrl).toString() : null
-              if (!verifyUrl) {
-                await createComment('检测到所有权验证进行中，但友链 JSON 中 url 无效；按旧逻辑继续自动合并。')
-              } else {
-                const verifyRes = await checkUrl(verifyUrl, { timeoutMs: 10000 })
-                if (!verifyRes.ok) {
-                  await createComment('所有权验证未通过（验证文件不可访问）；按旧逻辑继续自动合并。')
-                } else {
-                  const txt = await (async () => {
-                    const controller = new AbortController()
-                    const timer = setTimeout(() => controller.abort(), 10000)
-                    try {
-                      const res = await fetch(verifyUrl, {
-                        method: 'GET',
-                        redirect: 'follow',
-                        headers: { 'user-agent': 'fuwari-auto-pr/1.0 (+github actions)', accept: 'text/plain,*/*;q=0.8' },
-                        signal: controller.signal,
-                      })
-                      return await res.text()
-                    } finally {
-                      clearTimeout(timer)
-                    }
-                  })()
-                  if (!txt.includes(token)) {
-                    await createComment('所有权验证未通过（验证文件内容不匹配）；按旧逻辑继续自动合并。')
-                  }
-                }
-              }
             }
 
             try {
