@@ -1,10 +1,3 @@
----
-name: 拉取请求模板 (Pull Request Template)
-description: 提交拉取请求的指南
-labels: ["pr", "需要处理"]
-assignees: []
----
-
 ## 1. 遇到了什么问题？
 
 描述你修复的问题或添加的功能背景。
