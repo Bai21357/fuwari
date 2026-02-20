@@ -1,515 +1,544 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { getHue, getStoredTheme } from '@utils/setting-utils';
-  import Icon from "@iconify/svelte";
+import Icon from "@iconify/svelte";
+import { getHue, getStoredTheme } from "@utils/setting-utils";
+import { onMount } from "svelte";
 
-  let leftText = 'Text';
-  let rightText = 'Text';
-  let iconName = 'material-symbols:home-outline';
-  let fontSize = 64;
-  let iconSize = 64;
-  let gap = 20;
-  
-  // Color state
-  // Default to a dark gray for text and white for background, user can customize
-  // These are for the *canvas content*, not the UI.
-  // Ideally, we might want to set these based on the current theme initially, but
-  // if we want the tool to be "independent" of the site theme for the generated image,
-  // we can keep defaults static or detect once.
-  // The user asked "Why not use theme hue for container backgrounds".
-  // So I will update the UI containers to use var(--card-bg) etc.
-  // But for the *canvas itself*, it's better to keep it initialized to something contrasty
-  // or simple. Let's keep the initialization logic but maybe make it smarter?
-  // Actually, previous logic was fine for canvas defaults.
-  // I will re-add the initialization logic for canvas colors, but keep UI separate.
-  
-  let color = '#000000';
-  let bgColor = '#ffffff';
-  let bgColorOpacity = 1; // New background color opacity
-  let iconColor = '#000000';
-  let useOriginalIconColor = true; // Default to true
+let leftText = "Text";
+let rightText = "Text";
+let iconName = "material-symbols:home-outline";
+let fontSize = 64;
+let iconSize = 64;
+let gap = 20;
 
-  // Shadows
-  let textShadow = { x: 0, y: 0, blur: 0, color: '#000000', alpha: 0 };
-  let iconShadow = { x: 0, y: 0, blur: 0, color: '#000000', alpha: 0 };
-  let shadowTarget = 'both'; // 'both' | 'text' | 'icon'
-  
-  function updateShadow(key: string, value: any) {
-      if (shadowTarget === 'both' || shadowTarget === 'text') {
-          textShadow = { ...textShadow, [key]: value };
-      }
-      if (shadowTarget === 'both' || shadowTarget === 'icon') {
-          iconShadow = { ...iconShadow, [key]: value };
-      }
-  }
-  
-  // Helper to convert hex + alpha to rgba
-  function hexToRgba(hex: string, alpha: number) {
-      // hex should be #RRGGBB
-      const r = parseInt(hex.slice(1, 3), 16);
-      const g = parseInt(hex.slice(3, 5), 16);
-      const b = parseInt(hex.slice(5, 7), 16);
-      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-  }
+// Color state
+// Default to a dark gray for text and white for background, user can customize
+// These are for the *canvas content*, not the UI.
+// Ideally, we might want to set these based on the current theme initially, but
+// if we want the tool to be "independent" of the site theme for the generated image,
+// we can keep defaults static or detect once.
+// The user asked "Why not use theme hue for container backgrounds".
+// So I will update the UI containers to use var(--card-bg) etc.
+// But for the *canvas itself*, it's better to keep it initialized to something contrasty
+// or simple. Let's keep the initialization logic but maybe make it smarter?
+// Actually, previous logic was fine for canvas defaults.
+// I will re-add the initialization logic for canvas colors, but keep UI separate.
 
-  // Theme state for UI only
-  let hue = 250;
-  let isDark = true;
-  // Icon Background State
-  let iconBgEnabled = false;
-  let iconBgRadius = 20; // 0 to 50 (50% is circle)
-  let iconBgColor = '#000000';
-  let iconBgOpacity = 0.2;
-  let iconBgBlur = 0;
-  let iconBgPadding = 10;
-  // Icon Search
-  let searchQuery = '';
-  let searchResults: string[] = [];
-  let isSearching = false;
-  let searchDebounce: NodeJS.Timeout;
+let color = "#000000";
+let bgColor = "#ffffff";
+let bgColorOpacity = 1; // New background color opacity
+let iconColor = "#000000";
+let useOriginalIconColor = true; // Default to true
 
-  // Aspect Ratios
-  let ratios = [
-      { label: '1:1', w: 1, h: 1, checked: false },
-      { label: '4:3', w: 4, h: 3, checked: false },
-      { label: '16:9', w: 16, h: 9, checked: true },
-      { label: '21:9', w: 21, h: 9, checked: false }
-  ];
+// Shadows
+let textShadow = { x: 0, y: 0, blur: 0, color: "#000000", alpha: 0 };
+let iconShadow = { x: 0, y: 0, blur: 0, color: "#000000", alpha: 0 };
+let shadowTarget = "both"; // 'both' | 'text' | 'icon'
 
-  // Linked scaling state
-  let linkScale = true;
-  let baseScale = 100; // Percentage base for linked scaling
+function updateShadow(key: string, value: string | number) {
+	if (shadowTarget === "both" || shadowTarget === "text") {
+		textShadow = { ...textShadow, [key]: value };
+	}
+	if (shadowTarget === "both" || shadowTarget === "icon") {
+		iconShadow = { ...iconShadow, [key]: value };
+	}
+}
 
-  let iconSvg = '';
-  let svgContainer: SVGSVGElement;
+// Helper to convert hex + alpha to rgba
+function hexToRgba(hex: string, alpha: number) {
+	// hex should be #RRGGBB
+	const r = Number.parseInt(hex.slice(1, 3), 16);
+	const g = Number.parseInt(hex.slice(3, 5), 16);
+	const b = Number.parseInt(hex.slice(5, 7), 16);
+	return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
-  // Background Image State
-  let bgImage: string | null = null;
-  let bgImageX = 0;
-  let bgImageY = 0;
-  let bgImageScale = 1;
-  let bgBlur = 0; // New blur state
-  let bgOpacity = 1; // New opacity state
-  let isDragging = false;
-  let dragStartX = 0;
-  let dragStartY = 0;
-  let initialImageX = 0;
-  let initialImageY = 0;
-  let initialPinchDistance = 0;
-  let initialScale = 1;
+// Theme state for UI only
+let hue = 250;
+let isDark = true;
+// Icon Background State
+let iconBgEnabled = false;
+let iconBgRadius = 20; // 0 to 50 (50% is circle)
+let iconBgColor = "#000000";
+let iconBgOpacity = 0.2;
+let iconBgBlur = 0;
+let iconBgPadding = 10;
+// Icon Search
+let searchQuery = "";
+let searchResults: string[] = [];
+let isSearching = false;
+let searchDebounce: NodeJS.Timeout;
 
-  // Export Config
-  let exportConfig = {
-      format: 'png', // 'png' | 'svg'
-      scales: [1] as number[], // Export multiple scales
-      filename: 'cover',
-      transparentBg: false,
-      exportRatios: [] as string[] // Selected ratios to export (e.g. ['1:1', '16:9'])
-  };
+// Aspect Ratios
+let ratios = [
+	{ label: "1:1", w: 1, h: 1, checked: false },
+	{ label: "4:3", w: 4, h: 3, checked: false },
+	{ label: "16:9", w: 16, h: 9, checked: true },
+	{ label: "21:9", w: 21, h: 9, checked: false },
+];
 
-  onMount(() => {
-    hue = getHue();
-    const theme = getStoredTheme();
-    if (theme === 'auto') {
-        isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    } else {
-        isDark = theme === 'dark';
-    }
-    
-    // Set initial canvas colors based on theme, but they are editable
-    if (isDark) {
-        bgColor = '#1e1e1e';
-        color = '#ffffff';
-        iconColor = '#ffffff';
-    }
+// Linked scaling state
+let linkScale = true;
+let baseScale = 100; // Percentage base for linked scaling
 
-    // Default shadows should be transparent/none to avoid unwanted borders/strokes
-    // We use alpha=0 to represent transparency now
-    textShadow = { x: 0, y: 0, blur: 0, color: '#000000', alpha: 0 };
-    iconShadow = { x: 0, y: 0, blur: 0, color: '#000000', alpha: 0 };
-  });
+let iconSvg = "";
+let svgContainer: SVGSVGElement;
 
-  // Color linking state
-  let linkColor = true;
+// Background Image State
+let bgImage: string | null = null;
+let bgImageX = 0;
+let bgImageY = 0;
+let bgImageScale = 1;
+let bgBlur = 0; // New blur state
+let bgOpacity = 1; // New opacity state
+let isDragging = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let initialImageX = 0;
+let initialImageY = 0;
+let initialPinchDistance = 0;
+let initialScale = 1;
 
-  // Scale Linking Logic
-  let lastFontSize = fontSize;
-  let lastIconSize = iconSize;
+// Export Config
+let exportConfig = {
+	format: "png", // 'png' | 'svg'
+	scales: [1] as number[], // Export multiple scales
+	filename: "cover",
+	transparentBg: false,
+	exportRatios: [] as string[], // Selected ratios to export (e.g. ['1:1', '16:9'])
+};
 
-  function handleColorChange(newColor: string, type: 'text' | 'icon') {
-      if (type === 'text') {
-          color = newColor;
-          if (linkColor) iconColor = newColor;
-      } else {
-          iconColor = newColor;
-          if (linkColor) color = newColor;
-      }
-  }
+onMount(() => {
+	hue = getHue();
+	const theme = getStoredTheme();
+	if (theme === "auto") {
+		isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+	} else {
+		isDark = theme === "dark";
+	}
 
-  function handleFontSizeChange(e: Event) {
-      const newVal = (e.target as HTMLInputElement).valueAsNumber;
-      if (linkScale) {
-          const ratio = newVal / lastFontSize;
-          iconSize = Math.round(iconSize * ratio);
-          lastIconSize = iconSize;
-      }
-      fontSize = newVal;
-      lastFontSize = newVal;
-  }
+	// Set initial canvas colors based on theme, but they are editable
+	if (isDark) {
+		bgColor = "#1e1e1e";
+		color = "#ffffff";
+		iconColor = "#ffffff";
+	}
 
-  function handleIconSizeChange(e: Event) {
-      const newVal = (e.target as HTMLInputElement).valueAsNumber;
-      if (linkScale) {
-          const ratio = newVal / lastIconSize;
-          fontSize = Math.round(fontSize * ratio);
-          lastFontSize = fontSize;
-      }
-      iconSize = newVal;
-      lastIconSize = newVal;
-  }
+	// Default shadows should be transparent/none to avoid unwanted borders/strokes
+	// We use alpha=0 to represent transparency now
+	textShadow = { x: 0, y: 0, blur: 0, color: "#000000", alpha: 0 };
+	iconShadow = { x: 0, y: 0, blur: 0, color: "#000000", alpha: 0 };
+});
 
-  function handleBgImageUpload(e: Event) {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (file) {
-          const reader = new FileReader();
-          reader.onload = (e) => {
-              bgImage = e.target?.result as string;
-              
-              // Reset state
-              bgImageX = 0;
-              bgImageY = 0;
-              bgImageScale = 1;
-              bgBlur = 0;
-              bgOpacity = 1;
-          };
-          reader.readAsDataURL(file);
-      }
-  }
+// Color linking state
+let linkColor = true;
 
-  // Pointer state for multi-touch
-  let activePointers = new Map<number, { x: number, y: number }>();
+// Scale Linking Logic
+let lastFontSize = fontSize;
+let lastIconSize = iconSize;
 
-  function handlePointerDown(e: PointerEvent) {
-      if (!bgImage) return;
-      
-      // Critical: prevent browser default behavior (scrolling/selection)
-      e.preventDefault();
-      
-      // Capture pointer to track it even outside element
-      (e.currentTarget as Element).setPointerCapture(e.pointerId);
-      
-      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      
-      if (activePointers.size === 1) {
-          // Single touch/mouse: Drag start
-          isDragging = true;
-          dragStartX = e.clientX;
-          dragStartY = e.clientY;
-          initialImageX = bgImageX;
-          initialImageY = bgImageY;
-      } else if (activePointers.size === 2) {
-          // Multi touch: Pinch start
-          isDragging = false; // Disable drag during pinch
-          const points = Array.from(activePointers.values());
-          initialPinchDistance = Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y);
-          initialScale = bgImageScale;
-      }
-  }
+function handleColorChange(newColor: string, type: "text" | "icon") {
+	if (type === "text") {
+		color = newColor;
+		if (linkColor) iconColor = newColor;
+	} else {
+		iconColor = newColor;
+		if (linkColor) color = newColor;
+	}
+}
 
-  function handlePointerMove(e: PointerEvent) {
-      if (!bgImage || !activePointers.has(e.pointerId)) return;
-      e.preventDefault();
-      
-      // Update pointer position
-      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      
-      if (activePointers.size === 2) {
-          // Pinch Zoom
-          const points = Array.from(activePointers.values());
-          const currentDistance = Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y);
-          
-          if (initialPinchDistance > 0) {
-              const scaleFactor = currentDistance / initialPinchDistance;
-              bgImageScale = Math.max(0.1, Math.min(initialScale * scaleFactor, 10));
-          }
-      } else if (activePointers.size === 1 && isDragging) {
-          // Drag
-          const deltaX = e.clientX - dragStartX;
-          const deltaY = e.clientY - dragStartY;
-          bgImageX = initialImageX + (deltaX / bgImageScale);
-          bgImageY = initialImageY + (deltaY / bgImageScale);
-      }
-  }
+function handleFontSizeChange(e: Event) {
+	const newVal = (e.target as HTMLInputElement).valueAsNumber;
+	if (linkScale) {
+		const ratio = newVal / lastFontSize;
+		iconSize = Math.round(iconSize * ratio);
+		lastIconSize = iconSize;
+	}
+	fontSize = newVal;
+	lastFontSize = newVal;
+}
 
-  function handlePointerUp(e: PointerEvent) {
-      activePointers.delete(e.pointerId);
-      (e.currentTarget as Element).releasePointerCapture(e.pointerId);
-      
-      if (activePointers.size < 2) {
-          initialPinchDistance = 0;
-      }
-      if (activePointers.size === 0) {
-          isDragging = false;
-      }
-  }
-  
-  function handleWheel(e: WheelEvent) {
-      if (!bgImage) return;
-      e.preventDefault();
-      
-      // Use multiplicative scaling for smoother zooming at all levels
-      const scaleFactor = 1.1;
-      
-      if (e.deltaY < 0) {
-          // Zoom In
-          bgImageScale = Math.min(bgImageScale * scaleFactor, 10);
-      } else {
-          // Zoom Out
-          bgImageScale = Math.max(bgImageScale / scaleFactor, 0.1);
-      }
-  }
+function handleIconSizeChange(e: Event) {
+	const newVal = (e.target as HTMLInputElement).valueAsNumber;
+	if (linkScale) {
+		const ratio = newVal / lastIconSize;
+		fontSize = Math.round(fontSize * ratio);
+		lastFontSize = fontSize;
+	}
+	iconSize = newVal;
+	lastIconSize = newVal;
+}
 
-  // Computed Canvas Size
-  // Fix height to 900px, calculate width based on max ratio
-  const BASE_HEIGHT = 900;
-  
-  $: activeRatios = ratios.filter(r => r.checked);
-  
-  // Gracefully handle no selection: force 16:9 as visual default without checking it in UI
-  $: visualRatios = activeRatios.length > 0 ? activeRatios : [ratios[2]]; // Fallback to 16:9
-  
-  $: maxWidthRatio = visualRatios.reduce((max, r) => (r.w / r.h) > max ? (r.w / r.h) : max, 0);
-  $: canvasWidth = Math.round(BASE_HEIGHT * maxWidthRatio);
-  $: canvasHeight = BASE_HEIGHT;
+function handleBgImageUpload(e: Event) {
+	const file = (e.target as HTMLInputElement).files?.[0];
+	if (file) {
+		const reader = new FileReader();
+		reader.onload = (e) => {
+			bgImage = e.target?.result as string;
 
-  // Fetch icon SVG
-  $: {
-    if (iconName && iconName.includes(':')) {
-        const [prefix, name] = iconName.split(':');
-        fetch(`https://api.iconify.design/${prefix}/${name}.svg`)
-            .then(res => {
-                if (!res.ok) throw new Error('Icon not found');
-                return res.text();
-            })
-            .then(svg => {
-                // Remove width/height attributes to let us control them
-                let processedSvg = svg.replace(/width="[^"]*"/g, '')
-                                      .replace(/height="[^"]*"/g, '');
-                
-                // Only replace fill with currentColor if we are NOT using original colors
-                if (!useOriginalIconColor) {
-                    processedSvg = processedSvg.replace(/fill="[^"]*"/g, 'fill="currentColor"');
-                }
-                
-                iconSvg = processedSvg;
-            })
-            .catch(() => {
-                iconSvg = '';
-            });
-    } else {
-        iconSvg = '';
-    }
-  }
+			// Reset state
+			bgImageX = 0;
+			bgImageY = 0;
+			bgImageScale = 1;
+			bgBlur = 0;
+			bgOpacity = 1;
+		};
+		reader.readAsDataURL(file);
+	}
+}
 
-  async function handleSearch() {
-      if (!searchQuery) {
-          searchResults = [];
-          return;
-      }
-      isSearching = true;
-      try {
-          const res = await fetch(`https://api.iconify.design/search?query=${encodeURIComponent(searchQuery)}&limit=20`);
-          const data = await res.json();
-          searchResults = data.icons || [];
-      } catch (e) {
-          console.error(e);
-          searchResults = [];
-      } finally {
-          isSearching = false;
-      }
-  }
+// Pointer state for multi-touch
+let activePointers = new Map<number, { x: number; y: number }>();
 
-  function onSearchInput(e: Event) {
-      const val = (e.target as HTMLInputElement).value;
-      searchQuery = val;
-      
-      clearTimeout(searchDebounce);
-      if (val.trim()) {
-          searchDebounce = setTimeout(() => {
-              handleSearch();
-          }, 500);
-      } else {
-          searchResults = [];
-      }
-  }
+function handlePointerDown(e: PointerEvent) {
+	if (!bgImage) return;
 
-  function selectIcon(icon: string) {
-      iconName = icon;
-      searchResults = [];
-      searchQuery = '';
-  }
+	// Critical: prevent browser default behavior (scrolling/selection)
+	e.preventDefault();
 
-  async function doExport() {
-        if (!svgContainer) return;
+	// Capture pointer to track it even outside element
+	(e.currentTarget as Element).setPointerCapture(e.pointerId);
 
-        // Hide ratio guides for export
-        const guides = svgContainer.querySelectorAll('.ratio-guide');
-        guides.forEach(g => (g as SVGElement).style.display = 'none');
-        
-        // Hide canvas border for export
-        const border = svgContainer.querySelector('.canvas-border');
-        if (border) (border as SVGElement).style.display = 'none';
+	activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-        const svgClone = svgContainer.cloneNode(true) as SVGSVGElement;
-        
-        // Remove checkerboard pattern definition to prevent it from being used
-        const defs = svgClone.querySelector('defs');
-        if (defs) {
-            const pattern = defs.querySelector('#checkerboard');
-            if (pattern) pattern.remove();
-        }
-        
-        // Fix internal elements dimensions to absolute values to support cropping via viewBox
-        // Percentages in SVG resolve to the viewport size. When we change the SVG width/height for export,
-        // 100% would resolve to the new smaller width, causing the content to shrink and shift.
-        // By fixing them to the original canvasWidth/Height, we ensure they stay in the original coordinate space,
-        // allowing viewBox to correctly crop the center.
-        const bgRects = svgClone.querySelectorAll('rect');
-        // The first rect is checkerboard (if we keep it), second is solid color.
-        // We actually want to control the solid color rect.
-        // In our template: 
-        // 1. <rect ... fill="url(#checkerboard)" />
-        // 2. <rect ... fill={hexToRgba(bgColor, bgColorOpacity)} />
-        
-        const fo = svgClone.querySelector('foreignObject');
-        if (fo) {
-            fo.setAttribute('width', canvasWidth.toString());
-            fo.setAttribute('height', canvasHeight.toString());
-        }
+	if (activePointers.size === 1) {
+		// Single touch/mouse: Drag start
+		isDragging = true;
+		dragStartX = e.clientX;
+		dragStartY = e.clientY;
+		initialImageX = bgImageX;
+		initialImageY = bgImageY;
+	} else if (activePointers.size === 2) {
+		// Multi touch: Pinch start
+		isDragging = false; // Disable drag during pinch
+		const points = Array.from(activePointers.values());
+		initialPinchDistance = Math.hypot(
+			points[1].x - points[0].x,
+			points[1].y - points[0].y,
+		);
+		initialScale = bgImageScale;
+	}
+}
 
-        const bgImg = svgClone.querySelector('image');
-        if (bgImg) {
-            bgImg.setAttribute('width', canvasWidth.toString());
-            bgImg.setAttribute('height', canvasHeight.toString());
-            // Ensure blur filter and opacity is preserved
-            bgImg.style.filter = `blur(${bgBlur}px)`;
-            bgImg.style.opacity = bgOpacity.toString();
-        }
-        const checkerboardRect = bgRects[0];
-        if (checkerboardRect) checkerboardRect.remove();
-        
-        const solidBgRect = bgRects[1];
-        if (solidBgRect) {
-            solidBgRect.setAttribute('width', canvasWidth.toString());
-            solidBgRect.setAttribute('height', canvasHeight.toString());
-            
-            // Handle transparent background request
-            if (exportConfig.transparentBg) {
-                solidBgRect.setAttribute('fill', 'none');
-            } else {
-                // Use the opacity user set
-                solidBgRect.setAttribute('fill', hexToRgba(bgColor, bgColorOpacity));
-            }
-        }
+function handlePointerMove(e: PointerEvent) {
+	if (!bgImage || !activePointers.has(e.pointerId)) return;
+	e.preventDefault();
 
-        // Determine which ratios to export
-        // If specific ratios are selected in export settings, use those.
-        // Otherwise, fallback to currently active ratios in the preview.
-        const ratiosToExport = exportConfig.exportRatios.length > 0 
-            ? ratios.filter(r => exportConfig.exportRatios.includes(r.label))
-            : activeRatios;
+	// Update pointer position
+	activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-        for (const ratio of ratiosToExport) {
-            // Calculate dimensions for this specific ratio
-            // We keep height fixed at BASE_HEIGHT (900), and adjust width
-            const ratioWidth = Math.round(BASE_HEIGHT * (ratio.w / ratio.h));
-            const ratioHeight = BASE_HEIGHT;
-            
-            // Center the content in the new viewbox
-            // The original content is centered in canvasWidth.
-            // We need to adjust the viewBox to crop/center correctly.
-            // Since the content is centered using flexbox in foreignObject (width=100%),
-            // simply changing the viewBox width might not be enough if the SVG structure relies on fixed canvasWidth.
-            // However, our current implementation sets viewBox="0 0 {canvasWidth} {canvasHeight}".
-            // And content is centered.
-            
-            // To export different aspect ratios correctly from the same source, 
-            // we should conceptually "crop" the center of the canvas.
-            // The canvasWidth is calculated based on the WIDEST active ratio.
-            // So for narrower ratios, we just need to take the center slice.
-            
-            const xOffset = (canvasWidth - ratioWidth) / 2;
-            
-            // Create a specific clone for this ratio to modify attributes safely
-            const ratioSvgClone = svgClone.cloneNode(true) as SVGSVGElement;
-            ratioSvgClone.setAttribute('width', ratioWidth.toString());
-            ratioSvgClone.setAttribute('height', ratioHeight.toString());
-            ratioSvgClone.setAttribute('viewBox', `${xOffset} 0 ${ratioWidth} ${ratioHeight}`);
+	if (activePointers.size === 2) {
+		// Pinch Zoom
+		const points = Array.from(activePointers.values());
+		const currentDistance = Math.hypot(
+			points[1].x - points[0].x,
+			points[1].y - points[0].y,
+		);
 
-            const svgData = new XMLSerializer().serializeToString(ratioSvgClone);
-            
-            // Always append ratio suffix if we are in a multi-ratio context (activeRatios.length > 1)
-            // Even if the user selected only one specific ratio to export from the list,
-            // as long as the preview mode has multiple active ratios, we should distinguish them.
-            // OR: simply always append suffix if ratio label is present.
-            // User requirement: "同时导出时仍然带上16-9之类的文件名"
-            // Let's stick to: if multiple ratios are *being exported* OR multiple ratios are *active*?
-            // User said "当我选择两个就显示两个...同时导出时仍然带上16-9之类的文件名".
-            // It implies whenever there is ambiguity (multiple ratios involved in the session), we should label them.
-            // Let's simply always append suffix if activeRatios > 1, regardless of how many are currently selected for export.
-            
-            const ratioFilename = activeRatios.length > 1 
-                ? `${exportConfig.filename}-${ratio.label.replace(':', '-')}`
-                : exportConfig.filename;
+		if (initialPinchDistance > 0) {
+			const scaleFactor = currentDistance / initialPinchDistance;
+			bgImageScale = Math.max(0.1, Math.min(initialScale * scaleFactor, 10));
+		}
+	} else if (activePointers.size === 1 && isDragging) {
+		// Drag
+		const deltaX = e.clientX - dragStartX;
+		const deltaY = e.clientY - dragStartY;
+		bgImageX = initialImageX + deltaX / bgImageScale;
+		bgImageY = initialImageY + deltaY / bgImageScale;
+	}
+}
 
-            if (exportConfig.format === 'svg') {
-                const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-                const url = URL.createObjectURL(blob);
-                downloadLink(url, `${ratioFilename}.svg`);
-            } else {
-                const img = new Image();
-                img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
-                
-                await new Promise((resolve) => (img.onload = resolve));
+function handlePointerUp(e: PointerEvent) {
+	activePointers.delete(e.pointerId);
+	(e.currentTarget as Element).releasePointerCapture(e.pointerId);
 
-                const scales = exportConfig.scales.length > 0 ? exportConfig.scales : [1];
-                
-                for (const scale of scales) {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = ratioWidth * scale;
-                    canvas.height = ratioHeight * scale;
-                    const ctx = canvas.getContext('2d');
-                    if (!ctx) continue;
-                    
-                    ctx.imageSmoothingEnabled = true;
-                    ctx.imageSmoothingQuality = 'high';
-                    
-                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    
-                    // If only one scale is exported, don't append scale suffix
-                    // UNLESS multiple ratios are exported, then we still might want it? 
-                    // Actually user request is "对于多张图导出，当我上面仅勾选一个，就不显示。若勾选多个，则显示多个"
-                    // Assuming this applies to both ratio and scale suffixes logic.
-                    // Let's apply it to scale suffix too.
-                    const suffix = scales.length > 1 ? `@${scale}x` : '';
-                    downloadLink(canvas.toDataURL('image/png'), `${ratioFilename}${suffix}.png`);
-                }
-            }
-        }
+	if (activePointers.size < 2) {
+		initialPinchDistance = 0;
+	}
+	if (activePointers.size === 0) {
+		isDragging = false;
+	}
+}
 
-        // Restore guides
-        guides.forEach(g => (g as SVGElement).style.display = '');
-        if (border) (border as SVGElement).style.display = '';
-    }
+function handleWheel(e: WheelEvent) {
+	if (!bgImage) return;
+	e.preventDefault();
 
-  function downloadLink(url: string, filename: string) {
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-  }
+	// Use multiplicative scaling for smoother zooming at all levels
+	const scaleFactor = 1.1;
+
+	if (e.deltaY < 0) {
+		// Zoom In
+		bgImageScale = Math.min(bgImageScale * scaleFactor, 10);
+	} else {
+		// Zoom Out
+		bgImageScale = Math.max(bgImageScale / scaleFactor, 0.1);
+	}
+}
+
+// Computed Canvas Size
+// Fix height to 900px, calculate width based on max ratio
+const BASE_HEIGHT = 900;
+
+$: activeRatios = ratios.filter((r) => r.checked);
+
+// Gracefully handle no selection: force 16:9 as visual default without checking it in UI
+$: visualRatios = activeRatios.length > 0 ? activeRatios : [ratios[2]]; // Fallback to 16:9
+
+$: maxWidthRatio = visualRatios.reduce(
+	(max, r) => (r.w / r.h > max ? r.w / r.h : max),
+	0,
+);
+$: canvasWidth = Math.round(BASE_HEIGHT * maxWidthRatio);
+$: canvasHeight = BASE_HEIGHT;
+
+// Fetch icon SVG
+$: {
+	if (iconName?.includes(":")) {
+		const [prefix, name] = iconName.split(":");
+		fetch(`https://api.iconify.design/${prefix}/${name}.svg`)
+			.then((res) => {
+				if (!res.ok) throw new Error("Icon not found");
+				return res.text();
+			})
+			.then((svg) => {
+				// Remove width/height attributes to let us control them
+				let processedSvg = svg
+					.replace(/width="[^"]*"/g, "")
+					.replace(/height="[^"]*"/g, "");
+
+				// Only replace fill with currentColor if we are NOT using original colors
+				if (!useOriginalIconColor) {
+					processedSvg = processedSvg.replace(
+						/fill="[^"]*"/g,
+						'fill="currentColor"',
+					);
+				}
+
+				iconSvg = processedSvg;
+			})
+			.catch(() => {
+				iconSvg = "";
+			});
+	} else {
+		iconSvg = "";
+	}
+}
+
+async function handleSearch() {
+	if (!searchQuery) {
+		searchResults = [];
+		return;
+	}
+	isSearching = true;
+	try {
+		const res = await fetch(
+			`https://api.iconify.design/search?query=${encodeURIComponent(searchQuery)}&limit=20`,
+		);
+		const data = await res.json();
+		searchResults = data.icons || [];
+	} catch (e) {
+		console.error(e);
+		searchResults = [];
+	} finally {
+		isSearching = false;
+	}
+}
+
+function onSearchInput(e: Event) {
+	const val = (e.target as HTMLInputElement).value;
+	searchQuery = val;
+
+	clearTimeout(searchDebounce);
+	if (val.trim()) {
+		searchDebounce = setTimeout(() => {
+			handleSearch();
+		}, 500);
+	} else {
+		searchResults = [];
+	}
+}
+
+function selectIcon(icon: string) {
+	iconName = icon;
+	searchResults = [];
+	searchQuery = "";
+}
+
+async function doExport() {
+	if (!svgContainer) return;
+
+	// Hide ratio guides for export
+	const guides = svgContainer.querySelectorAll(".ratio-guide");
+	for (const g of guides) {
+		(g as SVGElement).style.display = "none";
+	}
+
+	// Hide canvas border for export
+	const border = svgContainer.querySelector(".canvas-border");
+	if (border) (border as SVGElement).style.display = "none";
+
+	const svgClone = svgContainer.cloneNode(true) as SVGSVGElement;
+
+	// Remove checkerboard pattern definition to prevent it from being used
+	const defs = svgClone.querySelector("defs");
+	if (defs) {
+		const pattern = defs.querySelector("#checkerboard");
+		if (pattern) pattern.remove();
+	}
+
+	// Fix internal elements dimensions to absolute values to support cropping via viewBox
+	// Percentages in SVG resolve to the viewport size. When we change the SVG width/height for export,
+	// 100% would resolve to the new smaller width, causing the content to shrink and shift.
+	// By fixing them to the original canvasWidth/Height, we ensure they stay in the original coordinate space,
+	// allowing viewBox to correctly crop the center.
+	const bgRects = svgClone.querySelectorAll("rect");
+	// The first rect is checkerboard (if we keep it), second is solid color.
+	// We actually want to control the solid color rect.
+	// In our template:
+	// 1. <rect ... fill="url(#checkerboard)" />
+	// 2. <rect ... fill={hexToRgba(bgColor, bgColorOpacity)} />
+
+	const fo = svgClone.querySelector("foreignObject");
+	if (fo) {
+		fo.setAttribute("width", canvasWidth.toString());
+		fo.setAttribute("height", canvasHeight.toString());
+	}
+
+	const bgImg = svgClone.querySelector("image");
+	if (bgImg) {
+		bgImg.setAttribute("width", canvasWidth.toString());
+		bgImg.setAttribute("height", canvasHeight.toString());
+		// Ensure blur filter and opacity is preserved
+		bgImg.style.filter = `blur(${bgBlur}px)`;
+		bgImg.style.opacity = bgOpacity.toString();
+	}
+	const checkerboardRect = bgRects[0];
+	if (checkerboardRect) checkerboardRect.remove();
+
+	const solidBgRect = bgRects[1];
+	if (solidBgRect) {
+		solidBgRect.setAttribute("width", canvasWidth.toString());
+		solidBgRect.setAttribute("height", canvasHeight.toString());
+
+		// Handle transparent background request
+		if (exportConfig.transparentBg) {
+			solidBgRect.setAttribute("fill", "none");
+		} else {
+			// Use the opacity user set
+			solidBgRect.setAttribute("fill", hexToRgba(bgColor, bgColorOpacity));
+		}
+	}
+
+	// Determine which ratios to export
+	// If specific ratios are selected in export settings, use those.
+	// Otherwise, fallback to currently active ratios in the preview.
+	const ratiosToExport =
+		exportConfig.exportRatios.length > 0
+			? ratios.filter((r) => exportConfig.exportRatios.includes(r.label))
+			: activeRatios;
+
+	for (const ratio of ratiosToExport) {
+		// Calculate dimensions for this specific ratio
+		// We keep height fixed at BASE_HEIGHT (900), and adjust width
+		const ratioWidth = Math.round(BASE_HEIGHT * (ratio.w / ratio.h));
+		const ratioHeight = BASE_HEIGHT;
+
+		// Center the content in the new viewbox
+		// The original content is centered in canvasWidth.
+		// We need to adjust the viewBox to crop/center correctly.
+		// Since the content is centered using flexbox in foreignObject (width=100%),
+		// simply changing the viewBox width might not be enough if the SVG structure relies on fixed canvasWidth.
+		// However, our current implementation sets viewBox="0 0 {canvasWidth} {canvasHeight}".
+		// And content is centered.
+
+		// To export different aspect ratios correctly from the same source,
+		// we should conceptually "crop" the center of the canvas.
+		// The canvasWidth is calculated based on the WIDEST active ratio.
+		// So for narrower ratios, we just need to take the center slice.
+
+		const xOffset = (canvasWidth - ratioWidth) / 2;
+
+		// Create a specific clone for this ratio to modify attributes safely
+		const ratioSvgClone = svgClone.cloneNode(true) as SVGSVGElement;
+		ratioSvgClone.setAttribute("width", ratioWidth.toString());
+		ratioSvgClone.setAttribute("height", ratioHeight.toString());
+		ratioSvgClone.setAttribute(
+			"viewBox",
+			`${xOffset} 0 ${ratioWidth} ${ratioHeight}`,
+		);
+
+		const svgData = new XMLSerializer().serializeToString(ratioSvgClone);
+
+		// Always append ratio suffix if we are in a multi-ratio context (activeRatios.length > 1)
+		// Even if the user selected only one specific ratio to export from the list,
+		// as long as the preview mode has multiple active ratios, we should distinguish them.
+		// OR: simply always append suffix if ratio label is present.
+		// User requirement: "同时导出时仍然带上16-9之类的文件名"
+		// Let's stick to: if multiple ratios are *being exported* OR multiple ratios are *active*?
+		// User said "当我选择两个就显示两个...同时导出时仍然带上16-9之类的文件名".
+		// It implies whenever there is ambiguity (multiple ratios involved in the session), we should label them.
+		// Let's simply always append suffix if activeRatios > 1, regardless of how many are currently selected for export.
+
+		const ratioFilename =
+			activeRatios.length > 1
+				? `${exportConfig.filename}-${ratio.label.replace(":", "-")}`
+				: exportConfig.filename;
+
+		if (exportConfig.format === "svg") {
+			const blob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+			const url = URL.createObjectURL(blob);
+			downloadLink(url, `${ratioFilename}.svg`);
+		} else {
+			const img = new Image();
+			img.src = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgData)))}`;
+
+			await new Promise<void>((resolve) => {
+				img.onload = () => resolve();
+			});
+
+			const scales = exportConfig.scales.length > 0 ? exportConfig.scales : [1];
+
+			for (const scale of scales) {
+				const canvas = document.createElement("canvas");
+				canvas.width = ratioWidth * scale;
+				canvas.height = ratioHeight * scale;
+				const ctx = canvas.getContext("2d");
+				if (!ctx) continue;
+
+				ctx.imageSmoothingEnabled = true;
+				ctx.imageSmoothingQuality = "high";
+
+				ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+				// If only one scale is exported, don't append scale suffix
+				// UNLESS multiple ratios are exported, then we still might want it?
+				// Actually user request is "对于多张图导出，当我上面仅勾选一个，就不显示。若勾选多个，则显示多个"
+				// Assuming this applies to both ratio and scale suffixes logic.
+				// Let's apply it to scale suffix too.
+				const suffix = scales.length > 1 ? `@${scale}x` : "";
+				downloadLink(
+					canvas.toDataURL("image/png"),
+					`${ratioFilename}${suffix}.png`,
+				);
+			}
+		}
+	}
+
+	// Restore guides
+	for (const g of guides) {
+		(g as SVGElement).style.display = "";
+	}
+	if (border) (border as SVGElement).style.display = "";
+}
+
+function downloadLink(url: string, filename: string) {
+	const link = document.createElement("a");
+	link.href = url;
+	link.download = filename;
+	document.body.appendChild(link);
+	link.click();
+	document.body.removeChild(link);
+}
 </script>
 
 <div class="flex flex-col items-center gap-8 w-full max-w-6xl mx-auto relative">

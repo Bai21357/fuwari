@@ -9,7 +9,7 @@ const totalPosts = posts.length;
 let totalWords = 0;
 for (const post of posts) {
 	const { remarkPluginFrontmatter } = await post.render();
-	if (remarkPluginFrontmatter && remarkPluginFrontmatter.words) {
+	if (remarkPluginFrontmatter?.words) {
 		totalWords += remarkPluginFrontmatter.words;
 	}
 }

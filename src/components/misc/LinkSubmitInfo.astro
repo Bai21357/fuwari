@@ -1,16 +1,17 @@
 ---
 interface Props {
-    dataType: 'friends' | 'sponsors';
-    class?: string;
+	dataType: "friends" | "sponsors";
+	class?: string;
 }
 
 const { dataType, class: className } = Astro.props;
 
-const linkText = dataType === 'friends' 
-    ? 'https://github.com/afoim/fuwari/tree/main/src/data/friends'
-    : 'https://github.com/afoim/fuwari/tree/main/src/data/sponsors';
+const linkText =
+	dataType === "friends"
+		? "https://github.com/afoim/fuwari/tree/main/src/data/friends"
+		: "https://github.com/afoim/fuwari/tree/main/src/data/sponsors";
 
-const dataName = dataType === 'friends' ? '友链' : '赞助';
+const dataName = dataType === "friends" ? "友链" : "赞助";
 ---
 
 <div class:list={["text-sm text-black/60 dark:text-white/60", className]}>
